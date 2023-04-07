@@ -1,0 +1,320 @@
+import sys
+print(sys.version)
+import json
+import numpy as np
+import pandas as pd
+import re,nltk,spacy,string
+import en_core_web_sm
+nlp = en_core_web_sm.load()
+import seaborn as sns
+import matplotlib.pyplot as plt
+%matplotlib inline
+from  plotly.offline import plot
+import plotly.graph_objects as go
+import plotly.express as px
+
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from pprint import pprint
+
+import warnings
+warnings.filterwarnings('ignore')
+
+pd.set_option('display.max_columns',None)
+pd.set_option('display.max_rows',None)
+
+Loading the data
+
+f = open('C:/uSERS/complaints.json')
+data= json.load(f)
+df = pd.json_normalize(data)
+
+df.shape
+
+df =  df.sample(100)
+df.shape
+
+df.head(5)
+
+df.columns
+
+df = df[['_source.complaint','_source.product','_source.sub_product',]]
+df.head()
+
+df = df.rename(columns=('_source.complaint_what_happened': 'complain_text', '_source.product':'category'})
+df.head()
+
+df['category'] = df['category'] + '+' +df['sub_category']
+df = df.drop(['sub_category'],axis=1)
+df.head()
+
+df[df['complaint_text']=='']=np.nan
+df.complaint_text.isnull().sum()
+
+def clean_text(text):
+      text = text.lower()
+      text = re.sub('\[.*\]','',text).strip()
+      text = text.translate(str.maketrans('','',string.punctuation))
+      text = re.sub('\S\*d\S*\s*','',text).strip()
+      return text.strip()
+      
+ df.complaint_text = df.complaint_text.apply(lambda x : clean_text(x))
+ df.complaint_text.head()
+ 
+ stopwords = nlp.Defaults.stop_words
+ def lemmatizer(text):
+      doc = nlp(text)
+      sent = [token.lemma_ for token in doc if not token.text in set(stopwords)]
+      return ' '.join(sent)
+      
+df['lemma'] = df.complaint_text.apply(lambda x : lemmatizer(x))
+df.head()
+
+df.shape
+
+df_clean = df[['complaint_text','lemma','category']]
+df_clean.head()
+
+def extract_pos_tags(text):
+     doc = nlp(text)
+     sent = [token.text for token in doc if token.tag_ == 'NN]
+     return ' '.join(sent)
+     
+df_clean['complaint_POS_removed'] = df_clean.lemma.apply(lamda x : extract_pos_tags(x))
+df_clean.head()
+
+plt.figure(figsize=(10,6))
+doc_lens = [len(d) for d in df_clean.compalint_POS_removed]
+plt.hist(doc_lens,bins=50)
+
+!pip install wordcloud
+from wordcloud import WordCloud
+wordcloud = WordCloud(stopwords=stopwords, max_words=40).generate(str(df_clean.complaint_POS_removed))
+print(wordcloud)
+plt.figure(figsize=(10,6))
+plt.imshow(wordcloud)
+plt.axis('off')
+plt.show()
+
+def get_top_n_bigram(text,ngram=1,top=None):
+    vec = CountVectorizer(ngram_range=(ngram, ngram),stop_words='english').fit(text)
+    bag_of_words = vec.transform(text)
+    sum_words = bag_of_words.sum(axis=0)
+    words_freq = [(word, sum_words[0,idx]) for word, idx in vec.vocabulary_.items()]
+    words_freq = sorted(words_freq,key=lambda x: x[1], reverse=True)
+    return words_freq[:top]
+    
+top_30_unigrams = get_top_n_bigram(df_clean.Complaint_clean,ngram=1, top=30)
+top_30_bigrams = get_top_n_bigram(df_clean.Complaint_clean,ngram=2, top=30)     
+
+df1 = pd.DataFrame(top_30_unigrams, columns = ['unigram', 'count'])
+plt.figure(figsize = (12,6))
+fig = sns.barplot(x=df1['unigram'], y=df1['count'])
+plt.xticks(rotation=80)
+plt.show()
+
+df1 = pd.DataFrame(top_30_bigrams, columns = ['bigram', 'count'])
+plt.figure(figsize = (12,6))
+fig = sns.barplot(x=df2['bigram'], y=df2['count'])
+plt.xticks(rotation=80)
+plt.show()
+
+
+df_clean['Complaint_clean'] = df_clean['Complaint_clean'].str.replace('xxxx', ' ')
+
+tfidf = TfidfVectorizer(min_df=2,max_df=0.95,stop_words='english')
+dtm = tfidf.fit_transform(df_clean.Complaint_clean)
+
+tfidf.get_feature_names()[:10]
+
+from sklearn.decomposition import NMF
+num_topics = 5
+nmf_model = NMF(n_components=num_topics, random_state=40)
+W1 = nmf_model.fit_transform(dtm)
+H1 = nmf_model.components_
+
+num_words = 15
+vocab = np.array(tfidf.get_feature_names())
+top_words = lambda t: [vocab[i] for i in np.argsort(t)[:-num_words-1:-1]]
+topic_words = ([top_words(t) for t in H1])
+topics = [' '.join(t) for t in topic_words]
+
+vocab
+
+topics 
+
+colnames =["Topic" + str(i) for i in range(nmf_model.n_components)]
+docnames = ["Doc" + str(i) for i in range(len(df_clean.Complaint_clean)]
+df_doc_topic = pd.DataFrame(np.round(W1,2), columns=colnames,index=docnames)
+significant_topic = np.argmax(df_doc_topic.values,axis=1)
+df_doc_topic ["dominant_topic"] = significant_topic
+df_doc_topic.head()
+
+df_clean['Topic'] = significant_topic
+df_clean[['complaint_text','Complaint_clean','category','Topic']][df_clean.Topic==4].head(30)
+
+temp=df_clean[['complaint_text','Complaint_clean','category','Topic']].groupby('Topic').head(10)
+temp.sort_values('Topic')
+
+topic_mapping = {
+    0: 'Bank Account services',
+    1: 'Credit card or prepaid card',
+    2: 'Others',
+    3: 'Theft/Dispute',
+    4: 'Mortgage'
+}
+df_clean['Topic'] = df_clean['Topic'].map(topic_mapping)
+df_clean.head()
+
+plt.figure(figsize=(12,6))
+sns.countplot(x='Topic', data=df_clean)
+
+training_data = df_clean[['complaint_text','Topic']]
+training_data.head()
+
+reverse_topic_mapping = {
+     'Bank Account Service' :0,
+     'Credit card or prepaid card' : 1,
+     'Others': 2,
+     'Theft': 3,
+     'Mortgage': 4
+}
+
+training_data['Topic'] = training_data['Topic'].map(reverse_topic_mapping)
+training_data.head()
+
+training_data[['complaint_text','Topic']][training_data.Topic==2].head(30)
+
+X = training_data.complaint_text
+y = training_data.Topic
+
+y.value_counts()
+
+!pip install imblearn
+
+from imblearn.over_sampling import SMOTE
+oversample = SMOTE(k_neighbors=2)
+count_vect = CountVectorizer()
+X_vect = count_vect.fit_transform(x)
+
+from sklearn.feature_extraction.text import TfidfTransformer
+tfidf_transformer = TfidfTransformer()
+x_tfidf = tfidf_transformer.fit_transform(X_vect)
+
+X_tfidf.shape
+
+Z = X_tfidf.toarray()
+Z , y =oversample.fit_resample(Z,y)
+y.value_counts()
+
+count_vect
+
+X_vect
+
+from sklearn.model_selection import train_test_split
+X_train,X_test,y_train,y_test = train_test_split(Z,y,random_state=20,stratify=y)
+
+def display_classification_report(model,metric):
+    y_train_pred_proba = model.predict_proba(X_train)
+    y_test_pred_proba = model.predict_proba(X_test)
+    roc_auc_score_train = round(roc_auc_score(y_train,y_train_pred_proba,average='weighted',multi__class='ovr'),2)
+    roc_auc_score_test = round(roc_auc_score(y_train,y_test_pred_proba,average='weighted',multi__class='ovr'),2)
+    print("ROC AUC Score" , roc_auc_score_train)
+    print("ROC AUC Score test:", roc_auc_score_test)
+    metric.append(roc_auc_score_train)
+    metric.append(roc_auc_score_test)
+    y_train_pred = model.predict(X_train)
+    y_test_pred = model.predict(X_test)
+    
+    precision_train,recall_train,fscore_train,support_train=precision_recall_fscore_support(y_train,y_train_pred,average='weighted')
+    precision_test,recall_test,fscore_test,support_test=precision_recall_fscore_support(y_test,y_test_pred,average='weighted')
+    
+    metric.append(acc_score_train)
+    metric.append(acc_score_test)
+    metric.append(round(precision_train,2))
+    metric.append(round(precision_test,2))
+    metric.append(round(recall_train,2))
+    metric.append(round(recall_test,2))
+    metric.append(round(fscore_train,2))
+    metric.append(round(fscore_test,2))
+    
+    print("Train Accuracy:", acc_score_train)
+    print("Test Accurcy:", acc_score_test)
+    
+    model_report_train = classification_report(y_train,y_train_pred)
+    model_report_test = classification_report(y_test, y_test_pred)
+    
+    print('Classification Report for Train:\n', model_report_train)
+    print('Classification Report for Test:\n', model_report_test)
+    
+    fig,ax = plt.subplots(figsize=(12,8))
+    cm = confusion_matrix(y_test,y_test_pred)
+    cmp = ConfusionMatrixDisplay(cm,display_labels=model.classes_)
+    cmp.plot(ax=ax)
+    plt.xticks(rotation=80)
+    plt.show();
+    
+    from sklearn.model_selection import KFold
+    folds = KFold(n_splits = 5, shuffle =True, random_state = 40)
+    
+    def grid_search(model,folds,params,scoring):
+        grid_search = GridSearchCV(model, cv = folds, param_grid=params,scoring=scoring,n_jobs=-1,verbose=1)
+        return grid_search
+        
+     def print_best_score_params(model):
+         print("Best Score:",model.best_score)
+         print("Best Hyperparameter:", model.best_params_)
+         
+   mnb = MultinomialNB()
+   mnb.fit(X_train,y_train)
+   metric1 = []
+   display_classification_report(mnb,metric1)
+   
+   knn = KNeighborsClassifier(n_neighbors=2)
+   knn.fit(X_train,y_train)
+   metric6=[]
+   display_classfication_report(knn,metric6)
+   
+   log_reg =LogisticRegression()
+   log_params = {'C':[.01,1,10],
+                'PENALTY':['L1','L2'],
+                'solver': ['liblinear','newton-cg','saga']
+                }
+   grid_search_log = grid_search(log_reg,folds,log_params,scoring=None)
+   grid_search_log.fit(X_train,y_train)
+   print_best_score_params(grid_search_log)
+   metric8=[]
+   display_classification_report(grid_search_log,metric8)
+   
+   table = {'Metric': ['ROC_AUC Score(Train)','ROC_AUC Score(Test)',
+                      'Accuracy(Train)','Accuracy(Test)',
+                      'Precision(Train)','PPrecision(Test)',
+                      'Recall(Train)', 'Recall(Test)',
+                      'F1-Score(Train)','F1-Score(Test)'
+                      ],
+                     'Multinomial Naive Bayes': metric1
+                     }
+ log_metric = pd.Series(metric2, name ='Logistic Regression')
+ dtc_metric = pd.Series(metric3, name='Decision Tree Classifier')
+ final_metric = pd.concat([log_metric, dtc_metric],axis=1)
+ 
+ 
+ Complaint Prediction
+ test_complaint = ' ccmldkqdkqw;'dl'
+ from sklearn import *
+ test = count_vect.transform([test_complaint])
+ test_tfidf = tfidf_transformer.transform(test)
+ 
+ with open('countvector_reg.pkl','wb') as fout:
+          pickle.dump(count_vect, fout)
+          
+ with open('tfidf_reg.pkl','wb') as fout:
+          pickle.dump(tfidf_transformer, fout)
+          
+  prediction = mnb.predict(test_tfidf)
+  prediction
+  
+  topic_mapping[prediction[0]]
+  
+  with open('mnb.pkl','wb') as fout:
+      pickle.dump(mnb,fout)
+      
