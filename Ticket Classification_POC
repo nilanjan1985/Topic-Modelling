@@ -213,6 +213,19 @@ X_vect
 from sklearn.model_selection import train_test_split
 X_train,X_test,y_train,y_test = train_test_split(Z,y,random_state=20,stratify=y)
 
+from sklear.naive_bayes import MultinomialNB
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree  import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+
+from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import GridSearchCV
+
+FROM SKLEARN IMPORT METRICS
+from sklearn.metrics import roc_auc_Score
+from sklearn.metrics import accuracy_score
+
 def display_classification_report(model,metric):
     y_train_pred_proba = model.predict_proba(X_train)
     y_test_pred_proba = model.predict_proba(X_test)
